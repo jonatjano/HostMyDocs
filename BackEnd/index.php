@@ -9,6 +9,8 @@ $settings = require 'src/settings.php';
 
 $slim = new \Slim\App($settings);
 
+require_once 'src/bootstrap.php';
+
 require 'src/dependencies.php';
 
 require 'src/middleware.php';

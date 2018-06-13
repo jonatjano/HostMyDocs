@@ -2,13 +2,21 @@
 
 namespace HostMyDocs\Models;
 
+use Doctrine\ORM\Mapping\Column;
+// use Doctrine\ORM\Mapping\Entity;
+use Doctrine\ORM\Mapping\OneToMany;
+
 /**
  * Model representing a Project
+ *
+ * @Entity @Table(name="projects")
  */
 class Project extends BaseModel
 {
     /**
      * @var null|string name of the project
+     *
+     * @Column(type="string")
      */
     private $name = null;
 
@@ -78,6 +86,7 @@ class Project extends BaseModel
         }
 
         $this->name = $name;
+        $this->id = 1;
 
         return $this;
     }
@@ -114,7 +123,9 @@ class Project extends BaseModel
      */
     public function setVersions(array $versions): self
     {
+        var_dump(is_array($this->versions));
         $this->versions = $versions;
+        var_dump(is_array($this->versions));
 
         return $this;
     }

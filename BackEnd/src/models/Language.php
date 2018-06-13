@@ -6,11 +6,21 @@ use Psr\Http\Message\UploadedFileInterface;
 
 /**
  * Model representing a programming language of a project
+ *
+ * @Entity @Table(name="languages")
+ * @HasLifecycleCallbacks
  */
 class Language extends BaseModel
 {
     /**
+     * @ManyToOne(targetEntity=HostMyDocs\Models\Version::class, cascade={"all"}, inversedBy="id")
+     */
+    private $version;
+
+    /**
      * @var null|string Name of the programming language
+     *
+     * @Column(type="string")
      */
     private $name = null;
 
@@ -18,6 +28,13 @@ class Language extends BaseModel
      * @var null|string path to the index file of the documentation
      */
     private $indexFile = null;
+
+    /**
+     * @var string folder of the documentation
+     *
+     * @Column(type="string")
+     */
+    private $folder = null;
 
     /**
      * @var null|UploadedFileInterface a downloadable zip of the current language and version of the documentation for the current project
@@ -47,6 +64,41 @@ class Language extends BaseModel
         }
 
         return $data;
+    }
+
+    public function getVersion()
+    {
+        return $this->version;
+    }
+
+    public function setVersion($version)
+    {
+        $this->version = $version;
+        return $this;
+    }
+
+    /**
+     * Set the value of Folder
+     *
+     * @param string folder
+     *
+     * @return Language this language
+     */
+    public function setFolder(string $folder)
+    {
+        $this->folder = $folder;
+        return $this;
+    }
+
+
+    /**
+     * Get the value of Folder
+     *
+     * @return string
+     */
+    public function getFolder(): string
+    {
+        return $this->folder;
     }
 
     /**

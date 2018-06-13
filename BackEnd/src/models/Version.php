@@ -2,13 +2,27 @@
 
 namespace HostMyDocs\Models;
 
+use Doctrine\ORM\Mapping\Column;
+// use Doctrine\ORM\Mapping\Entity;
+use Doctrine\ORM\Mapping\OneToMany;
+
 /**
  * Model representing a Version of a Project
+ *
+ * @Entity @Table(name="versions")
  */
 class Version extends BaseModel
 {
+
+    /**
+     * @ManyToOne(targetEntity=HostMyDocs\Models\Project::class, cascade={"all"}, inversedBy="id")
+     */
+    private $project;
+
     /**
      * @var null|string SemVer compliant number of the current version
+     *
+     * @Column(type="string")
      */
     private $number = null;
 
@@ -37,6 +51,17 @@ class Version extends BaseModel
         }
 
         return $data;
+    }
+
+    public function getProject()
+    {
+        return $this->project;
+    }
+
+    public function setProject($project)
+    {
+        $this->project = $project;
+        return $this;
     }
 
     /**
