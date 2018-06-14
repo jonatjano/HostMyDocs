@@ -87,6 +87,57 @@ class ProjectController
         $this->entityManager = $container['entityManager'];
     }
 
+	/**
+	 * [getPopulatedProject description]
+	 * @param  array   $params must have "name", "version", "language"
+	 * @return Project         [description]
+	 */
+    public function getPopulatedProject(array $params): Project
+    {
+		if (empty($params['name'])) {
+			throw new \InvalidArgumentException("Can't get project : miss the name parameter");
+		}
+
+		if (empty($params['version'])) {
+			throw new \InvalidArgumentException("Can't get project : miss the version parameter");
+		}
+
+		if (empty($params['language'])) {
+			throw new \InvalidArgumentException("Can't get project : miss the language parameter");
+		}
+
+        $projectRepository = $this->entityManager->getRepository('HostMyDocs\Models\Project');
+        $projects = $projectRepository->findBy(["name" => $params["name"]]);
+        if (count($projects) === 1) {
+            $project = $projects[0];
+
+			if (strlen($params['version']) !== 0) {
+				$versions = $versionRepository->findBy(["number" => $params['version'], "project" => $projects->getId()]);
+			} else {
+				$versions = $versionRepository->findBy(["project" => $projects->getId()]);
+			}
+			foreach ($versions as $version) {
+
+				if (strlen($params['language']) !== 0) {
+					$languages = $languageRepository->findBy(["name" => $params['language'], "version" => $version->getId()]);
+		        } else {
+					$languages = $languageRepository->findBy(["version" => $version->getId()]);
+		        }
+				foreach ($languages as $language) {
+					$version->addLanguage($language);
+				}
+
+				$project->addVersion($version);
+			}
+
+        } else {
+			$this->logger->info('no project found');
+            return null;
+        }
+
+        return $project;
+    }
+
     public function getProject(string $projectName, bool $canCreateNew = false): Project
     {
         $projectRepository = $this->entityManager->getRepository('HostMyDocs\Models\Project');
@@ -274,68 +325,58 @@ class ProjectController
      */
     public function deleteProject(Project $project): bool
     {
-        $version = $project->getFirstVersion();
-        $language = $version->getFirstLanguage();
+		foreach ($project->getVersions() as $version) {
+			foreach ($version->getLanguages() as $language) {
+				// code...
+			}
+		}
 
-        if ($version === null) {
-            $this->logger->critical('An error occured while building the project (it has no version)');
-            return false;
-        }
-
-        if ($language === null) {
-            $this->logger->critical('An error occured while building the project (it has no language)');
-            return false;
-        }
-
-        $fileNameParts = array_filter(
-            [
-                $project->getName(),
-                $version->getNumber(),
-                $language->getName()
-            ],
-            function ($v) {
-                return strlen($v) !== 0;
-            }
-        );
-
-        $archiveDestinationGlob = $this->archiveRoot . DIRECTORY_SEPARATOR . implode('-', $fileNameParts) . '*.zip';
-        $archiveToDelete = glob($archiveDestinationGlob);
-        if (count($archiveToDelete) !== 0) {
-            $this->filesystem->remove($archiveToDelete);
-        } else {
-            $this->logger->error('No backup found ' . $archiveDestinationGlob);
-        }
-
-        $storageDestinationPath = $this->storageRoot . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $fileNameParts);
-
-        if (file_exists($storageDestinationPath) === true) {
-            try {
-                $this->filesystem->remove($storageDestinationPath);
-            } catch (\Exception $e) {
-                $this->logger->critical('deleting project failed.');
-                return false;
-            }
-        } else {
-            $this->logger->info('project does not exists.');
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Remove every empty subfolder of the given folder
-     *
-     * @param  string $path Path to the folder to clean
-     *
-     * @return bool         Whether the cleaning succeed
-     */
-    public function removeEmptySubFolders(string $path): bool
-    {
-        $empty=true;
-        foreach (glob($path.DIRECTORY_SEPARATOR."*") as $file) {
-            $empty &= is_dir($file) && $this->removeEmptySubFolders($file);
-        }
-        return $empty && rmdir($path);
+        // $version = $project->getFirstVersion();
+        // $language = $version->getFirstLanguage();
+		//
+        // if ($version === null) {
+        //     $this->logger->critical('An error occured while building the project (it has no version)');
+        //     return false;
+        // }
+		//
+        // if ($language === null) {
+        //     $this->logger->critical('An error occured while building the project (it has no language)');
+        //     return false;
+        // }
+		//
+        // $fileNameParts = array_filter(
+        //     [
+        //         $project->getName(),
+        //         $version->getNumber(),
+        //         $language->getName()
+        //     ],
+        //     function ($v) {
+        //         return strlen($v) !== 0;
+        //     }
+        // );
+		//
+        // $archiveDestinationGlob = $this->archiveRoot . DIRECTORY_SEPARATOR . implode('-', $fileNameParts) . '*.zip';
+        // $archiveToDelete = glob($archiveDestinationGlob);
+        // if (count($archiveToDelete) !== 0) {
+        //     $this->filesystem->remove($archiveToDelete);
+        // } else {
+        //     $this->logger->error('No backup found ' . $archiveDestinationGlob);
+        // }
+		//
+        // $storageDestinationPath = $this->storageRoot . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $fileNameParts);
+		//
+        // if (file_exists($storageDestinationPath) === true) {
+        //     try {
+        //         $this->filesystem->remove($storageDestinationPath);
+        //     } catch (\Exception $e) {
+        //         $this->logger->critical('deleting project failed.');
+        //         return false;
+        //     }
+        // } else {
+        //     $this->logger->info('project does not exists.');
+        //     return false;
+        // }
+		//
+        // return true;
     }
 }
