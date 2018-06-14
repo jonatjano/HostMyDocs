@@ -25,6 +25,9 @@ $container['cache'] = function () {
     return new \Slim\HttpCache\CacheProvider();
 };
 
+// Contains the doctrine entity manager
+$container['entityManager'] = require __DIR__ . "/bootstrap.php";
+
 // Contains the projects controller
 $container['projectController'] = function () use ($container) {
     return new \HostMyDocs\Controllers\ProjectController($container);

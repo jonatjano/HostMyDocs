@@ -12,7 +12,7 @@ $conn = [
     // 'password' => 'password',
     // 'host' => 'db',
     'driver' => 'pdo_sqlite',
-    'path' => __DIR__ . '/db.sqlite'
+    'path' => $container->get('dbPath') . '/db.sqlite'
 ];
 
 $entityManager = EntityManager::create($conn, $config);

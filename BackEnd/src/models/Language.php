@@ -3,6 +3,7 @@
 namespace HostMyDocs\Models;
 
 use Psr\Http\Message\UploadedFileInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * Model representing a programming language of a project
@@ -13,6 +14,8 @@ use Psr\Http\Message\UploadedFileInterface;
 class Language extends BaseModel
 {
     /**
+     * the version associated to this language
+     *
      * @ManyToOne(targetEntity=HostMyDocs\Models\Version::class, cascade={"all"}, inversedBy="id")
      */
     private $version;
@@ -25,22 +28,27 @@ class Language extends BaseModel
     private $name = null;
 
     /**
-     * @var null|string path to the index file of the documentation
-     */
-    private $indexFile = null;
-
-    /**
-     * @var string folder of the documentation
+     * @var string uuid of the documentation
      *
      * @Column(type="string")
      */
-    private $folder = null;
+    private $uuid = null;
 
     /**
-     * @var null|UploadedFileInterface a downloadable zip of the current language and version of the documentation for the current project
-     * 		using the psr-7 interface
+     * @var string[] rootPaths for the docs and archives
      */
-    private $archiveFile = null;
+    private $rootPaths = [];
+
+    /**
+     * create a language
+     *
+     * @param LoggerInterface $logger Logger used to write logs
+     */
+    public function __construct(LoggerInterface $logger)
+    {
+        parent::__construct($logger);
+        $this->rootPaths = ['storageRoot' => "", 'archiveRoot' => ""];
+    }
 
     /**
      * Build a JSON serializable array
@@ -55,22 +63,40 @@ class Language extends BaseModel
             $data['name'] = $this->name;
         }
 
-        if ($this->indexFile !== null) {
-            $data['indexPath'] = $this->indexFile;
-        }
-
-        if ($this->archiveFile !== null) {
-            $data['archivePath'] = $this->archiveFile->file;
+        if ($this->uuid !== null) {
+            $data['indexPath'] = $this->rootPaths['storageRoot'] . "/" . $this->uuid . "/index.html";
+            $data['archivePath'] = $this->rootPaths['archiveRoot'] . "/" . $this->uuid . ".zip";
         }
 
         return $data;
     }
 
+    public function setRootPaths(array $rootPaths)
+    {
+        if (count($rootPaths) === 2 && isset($rootPaths["storageRoot"]) && isset($rootPaths["archiveRoot"])) {
+            $this->rootPaths = $rootPaths;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Get the version associated to this language
+     *
+     * @return Version the version associated to this language
+     */
     public function getVersion()
     {
         return $this->version;
     }
 
+    /**
+     * Set the version associated to this language
+     *
+     * @param Version $version the new version
+     *
+     * @return Language this language
+     */
     public function setVersion($version)
     {
         $this->version = $version;
@@ -78,27 +104,27 @@ class Language extends BaseModel
     }
 
     /**
-     * Set the value of Folder
+     * Set the value of Uuid
      *
-     * @param string folder
+     * @param string $uuid
      *
      * @return Language this language
      */
-    public function setFolder(string $folder)
+    public function setUuid(string $uuid)
     {
-        $this->folder = $folder;
+        $this->uuid = $uuid;
         return $this;
     }
 
 
     /**
-     * Get the value of Folder
+     * Get the value of Uuid
      *
      * @return string
      */
-    public function getFolder(): string
+    public function getUuid(): string
     {
-        return $this->folder;
+        return $this->uuid;
     }
 
     /**
@@ -137,58 +163,6 @@ class Language extends BaseModel
         }
 
         $this->name = $name;
-
-        return $this;
-    }
-
-    /**
-     * Get the path to the index.html file of the documentation
-     *
-     * @return null|string
-     */
-    public function getIndexFile(): ?string
-    {
-        return $this->indexFile;
-    }
-
-    /**
-     * Set the path to the index.html file of the documentation
-     *
-     * @param null|string $indexFile the path to the index file
-     *
-     * @return Language this language
-     */
-    public function setIndexFile(?string $indexFile): self
-    {
-        $this->indexFile = $indexFile;
-        return $this;
-    }
-
-    /**
-     * Get the archive file of this documentation
-     *
-     * @return null|UploadedFileInterface the archive
-     */
-    public function getArchiveFile(): ?UploadedFileInterface
-    {
-        return $this->archiveFile;
-    }
-
-    /**
-     * Set the archive file of this documentation using the psr-7 documentation
-     *
-     * @param UploadedFileInterface $archiveFile the archive file
-     *
-     * @return Language this Language if $archiveFile is valid, null otherwise
-     */
-    public function setArchiveFile(UploadedFileInterface $archiveFile): ?self
-    {
-        if ($archiveFile->getClientMediaType() !== 'application/zip') {
-            $errorMessage = 'archive is not a zip file';
-            return null;
-        }
-
-        $this->archiveFile = $archiveFile;
 
         return $this;
     }

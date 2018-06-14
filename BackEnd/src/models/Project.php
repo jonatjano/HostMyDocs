@@ -123,9 +123,7 @@ class Project extends BaseModel
      */
     public function setVersions(array $versions): self
     {
-        var_dump(is_array($this->versions));
         $this->versions = $versions;
-        var_dump(is_array($this->versions));
 
         return $this;
     }

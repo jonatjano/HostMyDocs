@@ -10,8 +10,9 @@ return [
         'displayErrorDetails' => true,
     ],
 
-    'storageRoot' => '/var/www/html/data/docs',
-    'archiveRoot' => '/var/www/html/data/archives',
+    'storageRoot' => '/data/docs',
+    'archiveRoot' => '/data/archives',
+    'dbPath' => '/data',
     'shouldSecure' => ! getenv('SHOULD_SECURE'),
     'authorizedUser' => function () {
         $credentials = getenv('CREDENTIALS');

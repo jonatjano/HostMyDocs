@@ -1,25 +1,27 @@
 <?php
-use Slim\Http\Response as Response;
-use Slim\Http\Request as Request;
 use HostMyDocs\Controllers\ProjectController;
 use HostMyDocs\Models\Language;
 use HostMyDocs\Models\Project;
 use HostMyDocs\Models\Version;
-use Psr\Log\LoggerInterface;
+use Psr\Container\ContainerInterface;
+use Slim\Http\Response as Response;
+use Slim\Http\Request as Request;
 
 if (!function_exists('createProjectFromRequest')) {
     /**
      * Take a Request to create the Project described in it's params
      *
-     * @param  Request         $request    The request containing th params
-     * @param  LoggerInterface $logger     The logger used to print errors
-     * @param  boolean         $allowEmpty If object allow empty params (e.g. to delete a whole Project)
+     * @param  Request            $request    The request containing th params
+     * @param  ContainerInterface $container  The dependancy container of the app
+     * @param  boolean            $allowEmpty If object allow empty params (e.g. to delete a whole Project)
      *
-     * @return array                       If an error occur this array contain the error message
+     * @return array                          If an error occur this array contain the error message
      * 		else it contains the part of the project
      */
-    function createProjectFromRequest(Request $request, LoggerInterface $logger, bool $allowEmpty = false): array
+    function createProjectFromRequest(Request $request, ContainerInterface $container, bool $isCreating = false): array
     {
+        $logger = $container->get('logger');
+
         $requestParams = $request->getParsedBody();
 
         if (count($requestParams) === 0) {
@@ -45,27 +47,24 @@ if (!function_exists('createProjectFromRequest')) {
 
         $logger->info('Checking provided parameters');
 
-        $project = new Project($logger);
-        $projectVersion = new Version($logger);
-        $projectLanguage = new Language($logger);
+        $project = $container->get("projectController")->getProject($name, $isCreating);
+        $projectVersion = $container->get("projectController")->getVersion($version, $project, $isCreating);
+        $projectLanguage = $container->get("projectController")->getLanguage($language, $projectVersion, $isCreating);
 
-        if ($project->setName($name) === null) {
-            return ['errorMessage' => 'Given name is not valid'];
+        if ($project === null) {
+            return ['errorMessage' => 'Cannot create a valid project'];
         }
-        if ($projectVersion->setNumber($version, $allowEmpty) === null) {
-            return ['errorMessage' => 'Given version is not valid'];
+        if ($projectVersion === null) {
+            return ['errorMessage' => 'Cannot create a valid version'];
         }
-        if ($projectLanguage->setName($language, $allowEmpty) === null) {
-            return ['errorMessage' => 'Given language is not valid'];
+        if ($projectLanguage === null) {
+            return ['errorMessage' => 'Cannot create a valid language'];
         }
         if ($allowEmpty) {
             if (strlen($language) !== 0 && strlen($version) === 0) {
                 return ['errorMessage' => 'language must be empty when version is empty'];
             }
         }
-
-        $projectVersion->addLanguage($projectLanguage);
-        $project->addVersion($projectVersion);
 
         return [
             'project' => $project,
@@ -89,8 +88,7 @@ $slim->get('/listProjects', function (Request $request, Response $response): Res
 });
 
 $slim->post('/addProject', function (Request $request, Response $response): Response {
-    $logger = $this->get('logger');
-    $params = createProjectFromRequest($request, $logger);
+    $params = createProjectFromRequest($request, $this, true);
     if (isset($params['errorMessage'])) {
         $response = $response->write($params['errorMessage']);
         return $response->withStatus(400);
@@ -107,11 +105,12 @@ $slim->post('/addProject', function (Request $request, Response $response): Resp
         return $response->withStatus(400);
     }
 
-    if ($projectLanguage->setArchiveFile($archive) === null) {
-        $response = $response->write('Invalid file parameter');
+    if ($this->get('projectController')->archiveIsValid($archive) === false) {
+        $response = $response->write('Archive is not valid');
         return $response->withStatus(400);
     }
 
+	$logger = $this->get('logger');
     $logger->info('Parameters OK');
 
     $logger->info("Name of the project : " . $project->getName());
@@ -120,7 +119,7 @@ $slim->post('/addProject', function (Request $request, Response $response): Resp
 
     $logger->info('Extracting the archive');
 
-    if ($this->get('projectController')->extract($project) === false) {
+    if ($this->get('projectController')->extract($archive, $projectLanguage->getUuid()) === false) {
         $response = $response->write('Failed to extract the archive');
         return $response->withStatus(400);
     }
@@ -129,7 +128,7 @@ $slim->post('/addProject', function (Request $request, Response $response): Resp
 
     $logger->info('Backuping uploaded file');
 
-    $destinationFolder =  $this->get('archiveRoot');
+    $destinationFolder = $this->get('archiveRoot');
     if (file_exists($destinationFolder) === false) {
         if (mkdir($destinationFolder, 0755, true) === false) {
             $response = $response->write('Failed to create backup folder');
@@ -137,15 +136,7 @@ $slim->post('/addProject', function (Request $request, Response $response): Resp
         }
     }
 
-    $destinationPath =
-    $destinationFolder
-    . DIRECTORY_SEPARATOR
-    . implode('-', [
-        $project->getName(),
-        $projectVersion->getNumber(),
-        $projectLanguage->getName()
-    ])
-    . '.zip';
+    $destinationPath = $destinationFolder . DIRECTORY_SEPARATOR . $projectLanguage->getUuid() . '.zip';
 
     $logger->info('Trying to move upload file to ' . $destinationPath);
 
@@ -168,37 +159,37 @@ $slim->post('/addProject', function (Request $request, Response $response): Resp
     return $response->withStatus(200);
 });
 
-$slim->delete('/deleteProject', function (Request $request, Response $response): Response {
-    $logger = $this->get('logger');
-    $params = createProjectFromRequest($request, $logger, true);
-
-    if (isset($params['errorMessage'])) {
-        $response = $response->write($params['errorMessage']);
-        return $response->withStatus(400);
-    }
-
-    $project = $params['project'];
-
-    $logger->info('Parameters OK');
-
-    $logger->info("Name of the project : $name");
-    $logger->info("Version of the project : $version");
-    $logger->info("Language of the project : $language");
-
-    $logger->info('Deleting folder + backup');
-
-    if ($this->get('projectController')->deleteProject($project) === false) {
-        $response = $response->write('Project deletion failed');
-        return $response->withStatus(400);
-    }
-
-    $logger->info('Deleting done.');
-
-    $logger->info('Removing resulting empty folders');
-    $this->get('projectController')->removeEmptySubFolders($this->get('storageRoot'));
-    $logger->info('Empty folders removed');
-
-    $logger->info('Project deleted successfully');
-
-    return $response->withStatus(200);
-});
+// $slim->delete('/deleteProject', function (Request $request, Response $response): Response {
+//     $logger = $this->get('logger');
+//     $params = createProjectFromRequest($request, $logger);
+//
+//     if (isset($params['errorMessage'])) {
+//         $response = $response->write($params['errorMessage']);
+//         return $response->withStatus(400);
+//     }
+//
+//     $project = $params['project'];
+//
+//     $logger->info('Parameters OK');
+//
+//     $logger->info("Name of the project : $name");
+//     $logger->info("Version of the project : $version");
+//     $logger->info("Language of the project : $language");
+//
+//     $logger->info('Deleting folder + backup');
+//
+//     if ($this->get('projectController')->deleteProject($project) === false) {
+//         $response = $response->write('Project deletion failed');
+//         return $response->withStatus(400);
+//     }
+//
+//     $logger->info('Deleting done.');
+//
+//     $logger->info('Removing resulting empty folders');
+//     $this->get('projectController')->removeEmptySubFolders($this->get('storageRoot'));
+//     $logger->info('Empty folders removed');
+//
+//     $logger->info('Project deleted successfully');
+//
+//     return $response->withStatus(200);
+// });

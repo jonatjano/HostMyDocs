@@ -2,11 +2,13 @@
 namespace HostMyDocs\Controllers;
 
 use Chumper\Zipper\Zipper;
+use Doctrine\ORM\EntityManager;
+use Doctrine\ORM\Id\UuidGenerator;
 use HostMyDocs\Models\Language;
 use HostMyDocs\Models\Project;
 use HostMyDocs\Models\Version;
+use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
-use Slim\Container;
 use Slim\Http\UploadedFile;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
@@ -41,20 +43,26 @@ class ProjectController
     private $logger;
 
     /**
+     * @var EntityManager Doctrine entityManager used to interact with database
+     */
+    private $entityManager;
+
+    /**
      * Create a project controller
      *
      * You must not call this function by yourselves but get an instance from the slim container
      *
-     * @param Container $container the slim container, it must contain the following keys
-     * 		- string storageRoot Path to the folder where projects are stored
-     * 		- string archiveRoot Path to the folder where archives are stored
-     * 		- Psr\Log\LoggerInterface Logger used by the class
+     * @param ContainerInterface $container the slim container, it must contain the following keys
+     * 		- string                     storageRoot   Path to the folder where projects are stored
+     * 		- string                     archiveRoot   Path to the folder where archives are stored
+     * 		- Psr\Log\LoggerInterface    logger        Logger used by the class
+     * 		- Doctrine\ORM\EntityManager entityManager the doctrine entityManager used to interact with database
      *
      * @throws InvalidArgumentException When the container miss a key
      *
      * @see https://www.slimframework.com/docs/concepts/di.html
      */
-    public function __construct(Container $container)
+    public function __construct(ContainerInterface $container)
     {
         if (empty($container['storageRoot'])) {
             throw new \InvalidArgumentException("Container doesn't contain the key 'storageRoot'");
@@ -68,126 +76,135 @@ class ProjectController
             throw new \InvalidArgumentException("Container doesn't contain the key 'logger'");
         }
 
+        if (empty($container['entityManager'])) {
+            throw new \InvalidArgumentException("Container doesn't contain the key 'entityManager'");
+        }
+
         $this->filesystem = new Filesystem();
         $this->storageRoot = $container['storageRoot'];
         $this->archiveRoot = $container['archiveRoot'];
         $this->logger = $container['logger'];
+        $this->entityManager = $container['entityManager'];
     }
 
-    /**
-     * Get all projects stored
-     *
-     * @return Project[] The list of projects
-     */
+    public function getProject(string $projectName, bool $canCreateNew = false): Project
+    {
+        $projectRepository = $this->entityManager->getRepository('HostMyDocs\Models\Project');
+        $projects = $projectRepository->findBy(["name" => $projectName]);
+        if (count($projects) === 0) {
+            if ($canCreateNew) {
+                $project = (new Project($this->logger))
+                    ->setName($projectName);
+
+                if ($project === null) {
+                    return null;
+                }
+
+                $this->entityManager->persist($project);
+                $this->entityManager->flush();
+            } else {
+                $project = null;
+            }
+        } else {
+            $project = $projects[0];
+        }
+
+        return $project;
+    }
+
+    public function getVersion(string $versionNumber, Project $parentProject, bool $canCreateNew = false): Version
+    {
+        $versionRepository = $this->entityManager->getRepository('HostMyDocs\Models\Version');
+        $versions = $versionRepository->findBy(["number" => $versionNumber, "project" => $parentProject->getId()]);
+        if (count($versions) === 0) {
+            if ($canCreateNew) {
+                $version = (new Version($this->logger))
+                    ->setProject($parentProject)
+                    ->setNumber($versionNumber);
+
+                if ($version === null) {
+                    return null;
+                }
+
+                $this->entityManager->persist($version);
+                $this->entityManager->flush();
+            } else {
+                $version = null;
+            }
+        } else {
+            $version = $versions[0];
+        }
+
+        return $version;
+    }
+
+    public function getLanguage(string $languageName, Version $parentVersion, bool $canCreateNew = false): Language
+    {
+        $languageRepository = $this->entityManager->getRepository('HostMyDocs\Models\Language');
+        $languages = $languageRepository->findBy(["name" => $languageName, "version" => $parentVersion->getId()]);
+        if (count($languages) === 0) {
+            if ($canCreateNew) {
+                $language = (new Language($this->logger))
+                    ->setName($languageName);
+
+                if ($language === null) {
+                    return null;
+                }
+
+                do {
+                    $uuid = (new UuidGenerator())->generate($this->entityManager, $language);
+                    $languagesAlreadyUsingUuid = $languageRepository->findBy(["uuid" => $uuid]);
+                } while (count($languagesAlreadyUsingUuid) != 0);
+
+                $language->setUuid($uuid)
+                    ->setVersion($parentVersion);
+                $this->entityManager->persist($language);
+                $this->entityManager->flush();
+            } else {
+                $language = null;
+            }
+        } else {
+            $language = $languages[0];
+        }
+
+        return $language;
+    }
+
     public function listProjects(): array
     {
-        $projects = [];
-        $projectLister  = new Finder();
-        $projectLister
-            ->ignoreDotFiles(false)
-            ->depth('== 0')
-            ->directories()
-            ->in($this->storageRoot)
-            ->sortByName();
-        $projectStructure = [];
+        $projectRepository = $this->entityManager->getRepository('HostMyDocs\Models\Project');
+        $projects = $projectRepository->findAll();
 
-        foreach ($projectLister as $projectFolder) {
-            $project = (new Project($this->logger))->setName($projectFolder->getFilename());
+        $versionRepository = $this->entityManager->getRepository('HostMyDocs\Models\Version');
 
-            $projectStructure[] = $projectFolder->getFilename();
+        $languageRepository = $this->entityManager->getRepository('HostMyDocs\Models\Language');
 
-            $this->listVersions($projectFolder, $project, $projectStructure);
+        foreach ($projects as $project) {
+            $versions = $versionRepository->findBy(["project" => $project->getId()]);
+            foreach ($versions as $version) {
+                $project->addVersion($version);
 
-            $projects[] = $project;
-
-            $projectStructure = [];
+                $languages = $languageRepository->findBy(["version" => $version->getId()]);
+                foreach ($languages as $language) {
+                    $version->addLanguage($language);
+                    $language->setRootPaths([
+                        'storageRoot' => $this->storageRoot,
+                        'archiveRoot' => $this->archiveRoot
+                    ]);
+                }
+            }
         }
 
         return $projects;
     }
 
-    /**
-     * Retrieve all stored versions for a project
-     *
-     * It has no return since it modify the project given in parameter
-     *
-     * @param SplFileInfo $projectFolder    Folder where the versions folders are found
-     * @param Project     $currentProject   Object containing the project being processed
-     * @param array       $projectStructure Array containing the parts of the path to the project
-     * 		e.g. ['DocumentationName']
-     */
-    private function listVersions(SplFileInfo $projectFolder, Project &$currentProject, array $projectStructure)
+    public function archiveIsValid(UploadedFile $archive)
     {
-        $versionLister  = new Finder();
-        $versionLister
-            ->ignoreDotFiles(false)
-            ->depth('== 0')
-            ->directories();
+		$zip = new \ZipArchive();
 
-        $versionStructure = $projectStructure;
-
-        /** @var SplFileInfo $versionFolder */
-        foreach ($versionLister->in($projectFolder->getRealPath()) as $versionFolder) {
-            $version = (new Version($this->logger))->setNumber($versionFolder->getFilename());
-
-            $versionStructure[] = $versionFolder->getFilename();
-
-            $this->listLanguages($versionFolder, $version, $versionStructure);
-
-            $currentProject->addVersion($version);
-
-            $versionStructure = $projectStructure;
-        }
-    }
-
-    /**
-      * Retrieve all languages stored for a version of a project
-      *
-      * It has no return since it modify the Version given in parameter
-      *
-      * @param SplFileInfo $versionFolder    Folder where the languages folders are found
-      * @param Version     $currentVersion   Object containing the version being processed
-      * @param array       $versionStructure array containing the parts of the path to the version
-      * 		e.g. ['DocumentationName', '1.0.0']
-      */
-    private function listLanguages(SplFileInfo $versionFolder, Version &$currentVersion, array $versionStructure)
-    {
-        $documentRoot = str_replace($_SERVER['DOCUMENT_ROOT'], '', $this->storageRoot);
-
-        $languageLister = new Finder();
-        $languageLister
-            ->ignoreDotFiles(false)
-            ->depth('== 0')
-            ->directories();
-
-        $languageStructure = $versionStructure;
-
-        /** @var SplFileInfo $languageFolder */
-        foreach ($languageLister->in($versionFolder->getRealPath()) as $languageFolder) {
-            $languageStructure[] = $languageFolder->getFilename();
-
-            $indexPath = [
-                $documentRoot,
-                implode('/', $languageStructure),
-                'index.html'
-            ];
-
-            $archiveRoot = str_replace($_SERVER['DOCUMENT_ROOT'], '', $this->archiveRoot);
-
-            $archivePath = $archiveRoot
-                . DIRECTORY_SEPARATOR
-                . implode('-', $languageStructure)
-                . '.zip';
-
-            $language = (new Language($this->logger))
-                ->setName($languageFolder->getFilename())
-                ->setIndexFile(implode('/', $indexPath))
-                ->setArchiveFile(new UploadedFile($archivePath, null, 'application/zip'));
-
-            $currentVersion->addLanguage($language);
-
-            $languageStructure = $versionStructure;
-        }
+		// ZipArchive::CHECKCONS will enforce additional consistency checks
+		$res = $zip->open($archive->file, \ZipArchive::CHECKCONS);
+		return $res === true;
     }
 
     /**
@@ -197,23 +214,10 @@ class ProjectController
      *
      * @return bool             Whether the extration succeed
      */
-    public function extract(Project $project): bool
+    public function extract(UploadedFile $archive, string $uuid): bool
     {
+
         $zipper = new Zipper();
-
-        $version = $project->getFirstVersion();
-        $language = $version->getFirstLanguage();
-        $archive = $language->getArchiveFile();
-
-        if ($version === null) {
-            $this->logger->critical('An error occured while building the project (it has no version)');
-            return false;
-        }
-
-        if ($language === null) {
-            $this->logger->critical('An error occured while building the project (it has no language)');
-            return false;
-        }
 
         if (is_file($archive->file) === false) {
             $this->logger->warning('impossible to open archive file');
@@ -236,12 +240,7 @@ class ProjectController
         $splittedPath = explode('/', $rootCandidates[0]);
         $zipRoot = array_shift($splittedPath);
 
-        $destinationPath = implode('/', [
-            $this->storageRoot,
-            $project->getName(),
-            $version->getNumber(),
-            $language->getName()
-        ]);
+        $destinationPath = $this->storageRoot . DIRECTORY_SEPARATOR . $uuid;
 
         if (filter_var($destinationPath, FILTER_SANITIZE_URL) === false) {
             $this->logger->warning('extract path contains invalid characters');
